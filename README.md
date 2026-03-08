@@ -14,21 +14,57 @@ There is also an **MCP server** in the `mcp-server/` folder that exposes this AP
 
 ## Setup
 
-1. **Install dependencies**
+1. **Install backend dependencies**
    ```bash
    npm install
    ```
 
-2. **Set MongoDB connection**
+2. **Set MongoDB connection for the backend**
    ```bash
-   export MONGO_URI="mongodb://..."
+   # example
+   export MONGO_URI="mongodb://localhost:27017/mcp-api"
    ```
 
-3. **Start the server**
+3. **Start the backend server**
    ```bash
    npm start
    ```
    Server runs on **port 3002** (see `PORT` in `server.js`).
+
+4. **Open the UI**
+
+   The UI is served from the `public/` folder by Express. Once the backend is running, open:
+
+   - `http://localhost:3002/` in your browser.
+
+---
+
+## Running the MCP server
+
+The MCP server lives in the `mcp-server/` folder and wraps this backend.
+
+1. **Make sure the backend is running first**
+
+   From the project root:
+   ```bash
+   # in one terminal
+   export MONGO_URI="mongodb://localhost:27017/mcp-api"
+   npm start          # backend on http://localhost:3002
+   ```
+
+2. **Start the MCP server**
+
+   In a new terminal:
+   ```bash
+   cd mcp-server
+   npm install        # first time only
+   npm start
+   ```
+
+   By default:
+   - Backend base URL: `http://localhost:3002`
+   - MCP server port: `3001`
+   - MCP HTTP endpoint: `POST http://localhost:3001/mcp`
 
 ---
 
