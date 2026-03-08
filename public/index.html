@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCP Blog</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-pill">MCP</span>
+        <div>
+          <h1>MCP Blog</h1>
+          <p class="subtitle">A clean blog powered by your API. Create stories, share ideas, and showcase comments in real time.</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel posts-panel">
+        <div class="panel-header">
+          <h2>Posts</h2>
+          <button id="refreshPostsBtn" class="btn ghost">Refresh</button>
+        </div>
+        <div id="postsList" class="posts-list empty-state">
+          <p>No posts yet. Create your first post on the right.</p>
+        </div>
+      </section>
+
+      <section class="panel editor-panel">
+        <div class="panel-header">
+          <h2 id="editorTitle">Create Post</h2>
+          <div class="editor-actions">
+            <button id="newPostBtn" class="btn ghost small">New</button>
+            <button id="deletePostBtn" class="btn danger small" disabled>Delete</button>
+          </div>
+        </div>
+
+        <form id="postForm" class="form">
+          <input type="hidden" id="postId" />
+
+          <div class="field">
+            <label for="title">Title</label>
+            <input id="title" name="title" type="text" placeholder="e.g. Building APIs with MCP" required />
+            <p class="hint">At least 5 characters.</p>
+          </div>
+
+          <div class="field">
+            <label for="author">Author</label>
+            <input id="author" name="author" type="text" placeholder="Your name" required />
+            <p class="hint">At least 3 characters.</p>
+          </div>
+
+          <div class="field">
+            <label for="category">Category</label>
+            <select id="category" name="category" required>
+              <option value="">Select a category</option>
+              <option value="tech">Tech</option>
+              <option value="finance">Finance</option>
+              <option value="lifestyle">Lifestyle</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="body">Body</label>
+            <textarea id="body" name="body" rows="6" placeholder="Write something interesting about your topic..." required></textarea>
+            <p class="hint">At least 50 characters.</p>
+          </div>
+
+          <div id="postError" class="alert error hidden"></div>
+          <div id="postSuccess" class="alert success hidden"></div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn primary" id="savePostBtn">
+              <span id="savePostText">Create Post</span>
+            </button>
+          </div>
+        </form>
+
+        <section class="comments-section">
+          <header class="comments-header">
+            <h3>Comments</h3>
+            <span id="commentsMeta" class="meta">Select a post to view comments.</span>
+          </header>
+
+          <div id="commentsList" class="comments-list empty-state">
+            <p>No post selected.</p>
+          </div>
+
+          <form id="commentForm" class="form inline-form">
+            <div class="field compact">
+              <label for="commenter">Name</label>
+              <input id="commenter" name="commenter" type="text" placeholder="Your name" required />
+            </div>
+            <div class="field compact">
+              <label for="commentText">Comment</label>
+              <input id="commentText" name="text" type="text" placeholder="Add a comment (min 10 chars)" required />
+            </div>
+            <button type="submit" class="btn secondary" id="addCommentBtn" disabled>Add Comment</button>
+          </form>
+          <div id="commentError" class="alert error hidden small"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <template id="postItemTemplate">
+    <article class="post-item">
+      <div class="post-main">
+        <h3 class="post-title"></h3>
+        <p class="post-body"></p>
+      </div>
+      <div class="post-meta">
+        <span class="pill pill-category"></span>
+        <span class="pill pill-author"></span>
+        <span class="pill pill-date"></span>
+      </div>
+    </article>
+  </template>
+
+  <template id="commentItemTemplate">
+    <div class="comment-item">
+      <p class="comment-text"></p>
+      <div class="comment-meta">
+        <span class="pill pill-author"></span>
+        <span class="pill pill-date"></span>
+      </div>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
+

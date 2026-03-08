@@ -1,0 +1,17 @@
+{
+  "name": "mcp-server-posts",
+  "version": "1.0.0",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "cors": "^2.8.6",
+    "express": "^4.21.0",
+    "zod": "^3.23.0"
+  }
+}
