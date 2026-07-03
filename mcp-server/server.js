@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+require('dotenv').config();
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const z = require('zod');
@@ -18,6 +19,7 @@ const VALID_CATEGORIES = ['tech', 'finance', 'lifestyle'];
 
 // --- API client: call Posts API and return parsed JSON or throw with message ---
 async function api(method, path, body) {
+  console.log(`API call: ${method} ${path} ${body ? JSON.stringify(body) : ''}`);
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body && (method === 'POST' || method === 'PUT')) opts.body = JSON.stringify(body);
