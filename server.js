@@ -4,7 +4,7 @@ require('dotenv').config();
 const app = express();
 app.use(express.json());
 app.use(express.static('public'));
-const cors=require("cors");
+const cors = require("cors");
 app.use(cors())
 
 const PORT = 3002;
@@ -151,6 +151,27 @@ app.get('/posts/:id/comments', async (req, res) => {
     if (!post) return sendError(res, 404, 'Post not found');
     const comments = await Comment.find({ postId: req.params.id }).sort({ createdAt: -1 });
     return res.json(comments);
+  } catch (err) {
+    return sendError(res, 500, err.message || 'Server error');
+  }
+});
+
+// AI Chatbot endpoint
+app.post('/ai-chatbot', async (req, res) => {
+  try {
+    const { message } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // For demonstration purposes, we'll just echo the message back
+    // In a real implementation, you would integrate with Ollama here
+    return res.json({
+      message: `AI Assistant response to: "${message}"`,
+      action: 'echo',
+      result: { echoedMessage: message }
+    });
   } catch (err) {
     return sendError(res, 500, err.message || 'Server error');
   }

@@ -4,7 +4,8 @@ require('dotenv').config();
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const z = require('zod');
-const cors=require("cors");
+const cors = require("cors");
+const { Ollama } = require('ollama');
 
 const app = express();
 app.use(express.json());
@@ -16,6 +17,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 const PORT = process.env.MCP_PORT || 3001;
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3002';
 const VALID_CATEGORIES = ['tech', 'finance', 'lifestyle'];
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma4:cloud';
+
+// Initialize Ollama client
+const ollama = new Ollama({ host: process.env.OLLAMA_HOST || 'http://localhost:11434' });
 
 // --- API client: call Posts API and return parsed JSON or throw with message ---
 async function api(method, path, body) {
@@ -56,6 +61,203 @@ function validateCommentInput(args) {
   if (args.text.trim().length < 10) return 'text must be at least 10 characters';
   if (!args.commenter || typeof args.commenter !== 'string') return 'commenter is required';
   return null;
+}
+
+function tryExtractJson(text) {
+  if (!text || typeof text !== 'string') return null;
+  let candidate = text.trim();
+
+  // Strip markdown fences if present
+  candidate = candidate.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1').trim();
+
+  // Try raw parse first
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    // Extract the first balanced JSON object from the text
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < candidate.length; i++) {
+      const char = candidate[i];
+      if (char === '{') {
+        if (depth === 0) start = i;
+        depth += 1;
+      } else if (char === '}') {
+        depth -= 1;
+        if (depth === 0 && start !== -1) {
+          const chunk = candidate.slice(start, i + 1);
+          try {
+            return JSON.parse(chunk);
+          } catch {
+            start = -1;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+// --- AI Chatbot Agent Functions ---
+async function processUserMessage(message, context = {}) {
+  // Get current posts to provide context to the AI
+  let postsContext = "";
+  try {
+    const posts = await api('GET', '/posts');
+    postsContext = `\n\nCurrent posts in the system:\n${JSON.stringify(posts.slice(0, 3), null, 2)}`;
+  } catch (err) {
+    console.error("Failed to fetch posts for context:", err.message);
+  }
+
+  const systemPrompt = `You are a helpful AI assistant. Always speak in short, simple English. Only output valid JSON with no extra text.`;
+  const userPrompt = `You can manage posts and comments. Use these actions:
+- create_post
+- list_posts
+- get_post
+- update_post
+- delete_post
+- add_comment
+- list_comments
+
+User message: "${message}"
+
+Current context:${postsContext}
+
+Return one JSON object with:
+- action: one of create_post, list_posts, get_post, update_post, delete_post, add_comment, list_comments
+- parameters: object with required inputs
+- explanation: short simple English
+
+If unsure, ask one simple question in explanation and use list_posts with empty parameters.
+`;
+
+  try {
+    const response = await ollama.chat({
+      model: OLLAMA_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      format: 'json'
+    });
+
+    const rawContent = response?.message?.content
+      ?? (Array.isArray(response?.message) ? response.message[0]?.content : undefined)
+      ?? response?.content
+      ?? '';
+    const content = typeof rawContent === 'string'
+      ? rawContent
+      : JSON.stringify(rawContent, null, 2);
+
+    const result = tryExtractJson(content);
+    if (!result || typeof result !== 'object' || !result.action) {
+      console.error('Error parsing AI response or missing action:', content);
+      return {
+        action: 'list_posts',
+        parameters: {},
+        explanation: 'I could not understand the AI response clearly, so I am showing the posts.'
+      };
+    }
+
+    const action = result.action;
+    const parameters = result.parameters || {};
+    const requiredFields = {
+      create_post: ['title', 'author', 'category', 'body'],
+      update_post: ['postId', 'title', 'author', 'category', 'body'],
+      get_post: ['postId'],
+      delete_post: ['postId'],
+      add_comment: ['postId', 'text', 'commenter'],
+      list_comments: ['postId'],
+      list_posts: []
+    };
+
+    if (!requiredFields[action]) {
+      console.error('Unknown action from AI response:', action, content);
+      return {
+        action: 'list_posts',
+        parameters: {},
+        explanation: 'I got an action I do not understand, so I am showing the posts.'
+      };
+    }
+
+    const missing = requiredFields[action].filter((field) => {
+      return parameters[field] === undefined || parameters[field] === null || String(parameters[field]).trim() === '';
+    });
+
+    if (missing.length) {
+      const missingList = missing.join(', ');
+      return {
+        action: 'clarify',
+        parameters: {},
+        explanation: `I need ${missingList} to do that. Please tell me the missing info in simple English.`
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error processing with Ollama:', error);
+    throw new Error('Failed to process request with AI assistant: ' + error.message);
+  }
+}
+
+async function executeAction(action, parameters) {
+  try {
+    switch (action) {
+      case "create_post":
+        const createError = validatePostInput(parameters);
+        if (createError) throw new Error(createError);
+        return await api('POST', '/posts', {
+          title: parameters.title.trim(),
+          author: parameters.author.trim(),
+          category: parameters.category,
+          body: parameters.body.trim()
+        });
+
+      case "list_posts":
+        return await api('GET', '/posts');
+
+      case "get_post":
+        if (!parameters.postId) throw new Error("postId is required");
+        return await api('GET', `/posts/${parameters.postId}`);
+
+      case "update_post":
+        if (!parameters.postId) throw new Error("postId is required");
+        const updateError = validatePostInput(parameters);
+        if (updateError) throw new Error(updateError);
+        return await api('PUT', `/posts/${parameters.postId}`, {
+          title: parameters.title.trim(),
+          author: parameters.author.trim(),
+          category: parameters.category,
+          body: parameters.body.trim()
+        });
+
+      case "delete_post":
+        if (!parameters.postId) throw new Error("postId is required");
+        return await api('DELETE', `/posts/${parameters.postId}`);
+
+      case "add_comment":
+        if (!parameters.postId) throw new Error("postId is required");
+        const commentError = validateCommentInput(parameters);
+        if (commentError) throw new Error(commentError);
+        return await api('POST', `/posts/${parameters.postId}/comments`, {
+          text: parameters.text.trim(),
+          commenter: parameters.commenter.trim()
+        });
+
+      case "list_comments":
+        if (!parameters.postId) throw new Error("postId is required");
+        return await api('GET', `/posts/${parameters.postId}/comments`);
+
+      case "clarify":
+        return { message: parameters.message || 'I need more details to complete that request.' };
+
+      default:
+        throw new Error(`Unknown action: ${action}`);
+    }
+  } catch (error) {
+    throw new Error(`Failed to execute ${action}: ${error.message}`);
+  }
 }
 
 // --- Build MCP server with tools (stateless: create per request) ---
@@ -162,6 +364,41 @@ function createMcpServer() {
     return { content: [{ type: 'text', text: JSON.stringify(comments, null, 2) }] };
   });
 
+  // --- New AI Chatbot Agent Tool ---
+  server.registerTool('ai_chatbot_agent', {
+    description: 'AI chatbot agent that can understand natural language requests and perform CRUD operations on posts and comments using the Ollama Gemma model.',
+    inputSchema: {
+      message: z.string().describe('User message to process'),
+      context: z.object({}).optional().describe('Additional context for the AI')
+    }
+  }, async (args) => {
+    try {
+      // Process the user message with the AI to determine the action
+      const actionPlan = await processUserMessage(args.message, args.context || {});
+
+      // Execute the determined action
+      const result = await executeAction(actionPlan.action, actionPlan.parameters);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Action completed: ${actionPlan.explanation}\n\nResult:\n${JSON.stringify(result, null, 2)}`
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error processing request: ${error.message}`
+          }
+        ]
+      };
+    }
+  });
+
   // --- Resource: API guide for posts (national duty / general) ---
   server.registerResource('posts-api-guide', 'https://posts-api.example/guide', {
     title: 'Posts API Guide',
@@ -235,6 +472,32 @@ app.post('/mcp', async (req, res) => {
   }
 });
 
+// --- New endpoint for direct AI chatbot interaction ---
+app.post('/ai-chatbot', async (req, res) => {
+  try {
+    const { message, context } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Process the user message with the AI to determine the action
+    const actionPlan = await processUserMessage(message, context || {});
+
+    // Execute the determined action
+    const result = await executeAction(actionPlan.action, actionPlan.parameters);
+
+    res.json({
+      action: actionPlan.action,
+      explanation: actionPlan.explanation,
+      result: result
+    });
+  } catch (error) {
+    console.error('AI Chatbot error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 app.get('/mcp', (req, res) => {
   res.status(405).json({
     jsonrpc: '2.0',
@@ -246,5 +509,5 @@ app.get('/mcp', (req, res) => {
 app.listen(PORT, () => {
   console.log(`MCP server (streamable HTTP) listening on port ${PORT}, endpoint POST /mcp (no auth)`);
   console.log(`API base: ${API_BASE}`);
+  console.log(`AI Chatbot endpoint: POST /ai-chatbot`);
 });
- 

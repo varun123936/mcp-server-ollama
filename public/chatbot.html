@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Chatbot Agent</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .chat-container {
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+
+    .chat-header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .chat-messages {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      height: 400px;
+      overflow-y: auto;
+    }
+
+    .message {
+      margin-bottom: 1rem;
+      padding: 0.75rem;
+      border-radius: 6px;
+    }
+
+    .user-message {
+      background-color: #e3f2fd;
+      margin-left: 20%;
+    }
+
+    .bot-message {
+      background-color: #f5f5f5;
+      margin-right: 20%;
+    }
+
+    .message-header {
+      font-weight: bold;
+      margin-bottom: 0.25rem;
+      font-size: 0.9rem;
+    }
+
+    .message-content {
+      white-space: pre-wrap;
+    }
+
+    .chat-input {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .chat-input input {
+      flex: 1;
+      padding: 0.75rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 1rem;
+    }
+
+    .chat-input button {
+      padding: 0.75rem 1.5rem;
+      background: #1976d2;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+
+    .chat-input button:hover {
+      background: #1565c0;
+    }
+
+    .chat-input button:disabled {
+      background: #bdbdbd;
+      cursor: not-allowed;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(25, 118, 210, 0.3);
+      border-radius: 50%;
+      border-top-color: #1976d2;
+      animation: spin 1s ease-in-out infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .examples {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 1.5rem;
+      margin-top: 1.5rem;
+    }
+
+    .examples h3 {
+      margin-top: 0;
+    }
+
+    .example-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .example-item {
+      padding: 1rem;
+      background: #f9f9f9;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .example-item:hover {
+      background: #e3f2fd;
+    }
+
+    .example-item h4 {
+      margin: 0 0 0.5rem 0;
+      color: #1976d2;
+    }
+
+    .example-item p {
+      margin: 0;
+      font-size: 0.9rem;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-pill">AI</span>
+        <div>
+          <h1>AI Chatbot Agent</h1>
+          <p class="subtitle">Interact with your blog using natural language commands</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="chat-container">
+      <div class="chat-header">
+        <h2>AI Assistant</h2>
+        <p>Ask me to create posts, edit content, delete articles, or manage comments</p>
+      </div>
+
+      <div id="chatMessages" class="chat-messages">
+        <div class="message bot-message">
+          <div class="message-header">AI Assistant</div>
+          <div class="message-content">Hello! I'm your AI assistant. You can ask me to help you manage your blog. For example:
+- "Create a new post about technology trends"
+- "List all posts"
+- "Delete the post with ID 123"
+- "Add a comment to post 456"</div>
+        </div>
+      </div>
+
+      <form id="chatForm" class="chat-input">
+        <input type="text" id="userInput" placeholder="Type your request here..." autocomplete="off" />
+        <button type="submit" id="sendButton">
+          <span id="buttonText">Send</span>
+        </button>
+      </form>
+
+      <div class="examples">
+        <h3>Try these examples:</h3>
+        <div class="example-list">
+          <div class="example-item" data-example="Create a new post about the benefits of AI in healthcare with the title 'AI in Healthcare', author 'Dr. Smith', category 'tech', and a body of at least 50 characters.">
+            <h4>Create a Post</h4>
+            <p>Create a new post about the benefits of AI in healthcare</p>
+          </div>
+          <div class="example-item" data-example="List all posts in the blog">
+            <h4>List Posts</h4>
+            <p>Show me all the posts in the blog</p>
+          </div>
+          <div class="example-item" data-example="Add a comment 'Great insights!' from 'Reader' to the latest post">
+            <h4>Add Comment</h4>
+            <p>Add a comment to the latest post</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:5001';
+    const chatMessages = document.getElementById('chatMessages');
+    const chatForm = document.getElementById('chatForm');
+    const userInput = document.getElementById('userInput');
+    const sendButton = document.getElementById('sendButton');
+    const buttonText = document.getElementById('buttonText');
+
+    function addMessage(role, content) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${role}-message`;
+
+      const headerDiv = document.createElement('div');
+      headerDiv.className = 'message-header';
+      headerDiv.textContent = role === 'user' ? 'You' : 'AI Assistant';
+
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'message-content';
+      contentDiv.textContent = content;
+
+      messageDiv.appendChild(headerDiv);
+      messageDiv.appendChild(contentDiv);
+      chatMessages.appendChild(messageDiv);
+
+      // Scroll to bottom
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function setLoading(loading) {
+      if (loading) {
+        buttonText.innerHTML = '<div class="loading"></div>';
+        sendButton.disabled = true;
+        userInput.disabled = true;
+      } else {
+        buttonText.textContent = 'Send';
+        sendButton.disabled = false;
+        userInput.disabled = false;
+      }
+    }
+
+    async function sendMessage(message) {
+      addMessage('user', message);
+      setLoading(true);
+
+      try {
+        const response = await fetch(`${API_BASE}/ai-chatbot`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ message })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to process request');
+        }
+
+        const responseText = `Explanation: ${data.explanation}\n\nResult:\n${typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2)}`;
+        addMessage('bot', responseText);
+      } catch (error) {
+        addMessage('bot', `Error: ${error.message}`);
+      } finally {
+        setLoading(false);
+        userInput.value = '';
+      }
+    }
+
+    chatForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const message = userInput.value.trim();
+      if (message) {
+        await sendMessage(message);
+      }
+    });
+
+    // Add example click handlers
+    document.querySelectorAll('.example-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const example = item.getAttribute('data-example');
+        userInput.value = example;
+        userInput.focus();
+      });
+    });
+
+    // Focus input on load
+    userInput.focus();
+  </script>
+</body>
+</html>
