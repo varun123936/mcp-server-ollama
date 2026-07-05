@@ -14,33 +14,60 @@ app.use(cors())
 // Serve static UI assets from /public
 app.use(express.static(path.join(__dirname, 'public')));
 
-const PORT = process.env.MCP_PORT || 3001;
+const PORT = process.env.MCP_PORT || 5001;
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3002';
 const VALID_CATEGORIES = ['tech', 'finance', 'lifestyle'];
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma4:cloud';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma2';
 
 // Initialize Ollama client
-const ollama = new Ollama({ host: process.env.OLLAMA_HOST || 'http://localhost:11434' });
+const ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
+const ollama = new Ollama({ host: ollamaHost });
+
+// Logger utility
+const logger = {
+  info: (msg) => console.log(`[INFO] ${new Date().toISOString()} - ${msg}`),
+  error: (msg, err) => console.error(`[ERROR] ${new Date().toISOString()} - ${msg}`, err || ''),
+  warn: (msg) => console.warn(`[WARN] ${new Date().toISOString()} - ${msg}`)
+};
 
 // --- API client: call Posts API and return parsed JSON or throw with message ---
 async function api(method, path, body) {
-  console.log(`API call: ${method} ${path} ${body ? JSON.stringify(body) : ''}`);
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body && (method === 'POST' || method === 'PUT')) opts.body = JSON.stringify(body);
-  const res = await fetch(url, opts);
-  const text = await res.text();
-  let data;
+  logger.info(`API call: ${method} ${url}`);
+  
+  const opts = { 
+    method, 
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 10000
+  };
+  
+  if (body && (method === 'POST' || method === 'PUT')) {
+    opts.body = JSON.stringify(body);
+  }
+  
   try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = {};
+    const res = await fetch(url, opts);
+    const text = await res.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (e) {
+      logger.error('Failed to parse API response:', e);
+      data = {};
+    }
+    
+    if (!res.ok) {
+      const msg = data.error || res.statusText || `HTTP ${res.status}`;
+      logger.error(`API error: ${msg}`);
+      throw new Error(msg);
+    }
+    
+    logger.info(`API success: ${method} ${url}`);
+    return data;
+  } catch (error) {
+    logger.error(`API call failed: ${method} ${url}`, error);
+    throw error;
   }
-  if (!res.ok) {
-    const msg = data.error || res.statusText || `HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-  return data;
 }
 
 // --- Validation (same rules as main API) ---
@@ -101,62 +128,83 @@ function tryExtractJson(text) {
 
 // --- AI Chatbot Agent Functions ---
 async function processUserMessage(message, context = {}) {
+  logger.info(`Processing user message: "${message}"`);
+  
   // Get current posts to provide context to the AI
   let postsContext = "";
+  let posts = [];
   try {
-    const posts = await api('GET', '/posts');
-    postsContext = `\n\nCurrent posts in the system:\n${JSON.stringify(posts.slice(0, 3), null, 2)}`;
+    posts = await api('GET', '/posts');
+    const postSummary = posts.slice(0, 5).map(p => `- "${p.title}" (ID: ${p._id})`).join('\n');
+    postsContext = posts.length > 0 
+      ? `\n\nCurrent posts in system:\n${postSummary}`
+      : '\n\nNo posts currently in system.';
   } catch (err) {
-    console.error("Failed to fetch posts for context:", err.message);
+    logger.warn(`Failed to fetch posts for context: ${err.message}`);
+    postsContext = "\n\nCould not fetch current posts.";
   }
 
-  const systemPrompt = `You are a helpful AI assistant. Always speak in short, simple English. Only output valid JSON with no extra text.`;
-  const userPrompt = `You can manage posts and comments. Use these actions:
-- create_post
-- list_posts
-- get_post
-- update_post
-- delete_post
-- add_comment
-- list_comments
+  const systemPrompt = `You are a production-grade AI assistant for managing a blog. 
+You must understand user intent and perform the appropriate action.
+Always respond with ONLY valid JSON, no markdown, no extra text, no explanations outside JSON.
+Be precise and accurate.`;
 
-User message: "${message}"
+  const userPrompt = `You manage blog posts and comments. Available actions:
+- create_post (need: title, author, category, body)
+- list_posts (no params needed)
+- get_post (need: postId)
+- update_post (need: postId, title, author, category, body)
+- delete_post (need: postId - WARNING: deletes post and ALL comments)
+- add_comment (need: postId, text, commenter)
+- list_comments (need: postId)
 
-Current context:${postsContext}
+User request: "${message}"
+${postsContext}
 
-Return one JSON object with:
-- action: one of create_post, list_posts, get_post, update_post, delete_post, add_comment, list_comments
-- parameters: object with required inputs
-- explanation: short simple English
+Respond ONLY with this JSON structure (no other text):
+{
+  "action": "one of the actions listed above",
+  "parameters": {object with required fields},
+  "explanation": "brief explanation in simple English of what you're doing"
+}
 
-If unsure, ask one simple question in explanation and use list_posts with empty parameters.
-`;
+Rules:
+1. Extract PostId from phrases like "post with ID xyz" or "post xyz"
+2. For delete, confirm you understood - be explicit
+3. Always validate required fields are present
+4. Never make up information`;
 
   try {
+    logger.info(`Calling Ollama model: ${OLLAMA_MODEL}`);
+    
     const response = await ollama.chat({
       model: OLLAMA_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      format: 'json'
+      format: 'json',
+      stream: false
     });
 
     const rawContent = response?.message?.content
       ?? (Array.isArray(response?.message) ? response.message[0]?.content : undefined)
       ?? response?.content
       ?? '';
+    
     const content = typeof rawContent === 'string'
-      ? rawContent
+      ? rawContent.trim()
       : JSON.stringify(rawContent, null, 2);
+
+    logger.info(`Ollama response: ${content.substring(0, 200)}`);
 
     const result = tryExtractJson(content);
     if (!result || typeof result !== 'object' || !result.action) {
-      console.error('Error parsing AI response or missing action:', content);
+      logger.warn(`Invalid AI response, returning list_posts: ${content}`);
       return {
         action: 'list_posts',
         parameters: {},
-        explanation: 'I could not understand the AI response clearly, so I am showing the posts.'
+        explanation: 'I could not parse your request clearly. Showing all posts instead.'
       };
     }
 
@@ -173,11 +221,11 @@ If unsure, ask one simple question in explanation and use list_posts with empty 
     };
 
     if (!requiredFields[action]) {
-      console.error('Unknown action from AI response:', action, content);
+      logger.warn(`Unknown action from AI: ${action}`);
       return {
         action: 'list_posts',
         parameters: {},
-        explanation: 'I got an action I do not understand, so I am showing the posts.'
+        explanation: 'I did not understand that action. Showing posts instead.'
       };
     }
 
@@ -187,75 +235,143 @@ If unsure, ask one simple question in explanation and use list_posts with empty 
 
     if (missing.length) {
       const missingList = missing.join(', ');
+      logger.info(`Missing required fields for ${action}: ${missingList}`);
       return {
         action: 'clarify',
-        parameters: {},
-        explanation: `I need ${missingList} to do that. Please tell me the missing info in simple English.`
+        parameters: { missing },
+        explanation: `To ${action}, I need: ${missingList}. Please provide these details.`
       };
     }
 
+    logger.info(`Parsed action: ${action}, parameters: ${JSON.stringify(parameters)}`);
     return result;
   } catch (error) {
-    console.error('Error processing with Ollama:', error);
-    throw new Error('Failed to process request with AI assistant: ' + error.message);
+    logger.error(`Error processing with Ollama: ${error.message}`, error);
+    // Fallback: try to understand the message without AI
+    logger.info('Attempting fallback pattern matching...');
+    return parseMessageFallback(message);
   }
 }
 
+// Fallback pattern-based message parsing
+function parseMessageFallback(message) {
+  const lower = message.toLowerCase();
+  
+  if ((lower.includes('delete') || lower.includes('remove')) && lower.includes('post')) {
+    const idMatch = message.match(/\b([0-9a-f]{24})\b/i);
+    if (idMatch) {
+      return {
+        action: 'delete_post',
+        parameters: { postId: idMatch[1] },
+        explanation: `Deleting post ${idMatch[1]}`
+      };
+    }
+  }
+  
+  if (lower.includes('list') && lower.includes('post')) {
+    return {
+      action: 'list_posts',
+      parameters: {},
+      explanation: 'Showing all posts'
+    };
+  }
+  
+  if (lower.includes('create') && lower.includes('post')) {
+    return {
+      action: 'clarify',
+      parameters: {},
+      explanation: 'To create a post, please provide: title, author, category (tech/finance/lifestyle), and body (50+ characters)'
+    };
+  }
+  
+  return {
+    action: 'list_posts',
+    parameters: {},
+    explanation: 'I did not understand. Showing available posts.'
+  };
+}
+
 async function executeAction(action, parameters) {
+  logger.info(`Executing action: ${action} with params: ${JSON.stringify(parameters)}`);
+  
   try {
     switch (action) {
-      case "create_post":
+      case "create_post": {
         const createError = validatePostInput(parameters);
         if (createError) throw new Error(createError);
-        return await api('POST', '/posts', {
+        const result = await api('POST', '/posts', {
           title: parameters.title.trim(),
           author: parameters.author.trim(),
           category: parameters.category,
           body: parameters.body.trim()
         });
+        logger.info(`Post created with ID: ${result._id}`);
+        return result;
+      }
 
-      case "list_posts":
-        return await api('GET', '/posts');
+      case "list_posts": {
+        const result = await api('GET', '/posts');
+        logger.info(`Retrieved ${result.length} posts`);
+        return result;
+      }
 
-      case "get_post":
+      case "get_post": {
         if (!parameters.postId) throw new Error("postId is required");
-        return await api('GET', `/posts/${parameters.postId}`);
+        const result = await api('GET', `/posts/${parameters.postId}`);
+        logger.info(`Retrieved post: ${result._id}`);
+        return result;
+      }
 
-      case "update_post":
+      case "update_post": {
         if (!parameters.postId) throw new Error("postId is required");
         const updateError = validatePostInput(parameters);
         if (updateError) throw new Error(updateError);
-        return await api('PUT', `/posts/${parameters.postId}`, {
+        const result = await api('PUT', `/posts/${parameters.postId}`, {
           title: parameters.title.trim(),
           author: parameters.author.trim(),
           category: parameters.category,
           body: parameters.body.trim()
         });
+        logger.info(`Post updated: ${parameters.postId}`);
+        return result;
+      }
 
-      case "delete_post":
+      case "delete_post": {
         if (!parameters.postId) throw new Error("postId is required");
-        return await api('DELETE', `/posts/${parameters.postId}`);
+        logger.warn(`DELETE operation initiated for post: ${parameters.postId}`);
+        const result = await api('DELETE', `/posts/${parameters.postId}`);
+        logger.info(`Post deleted: ${parameters.postId}`);
+        return result;
+      }
 
-      case "add_comment":
+      case "add_comment": {
         if (!parameters.postId) throw new Error("postId is required");
         const commentError = validateCommentInput(parameters);
         if (commentError) throw new Error(commentError);
-        return await api('POST', `/posts/${parameters.postId}/comments`, {
+        const result = await api('POST', `/posts/${parameters.postId}/comments`, {
           text: parameters.text.trim(),
           commenter: parameters.commenter.trim()
         });
+        logger.info(`Comment added to post: ${parameters.postId}`);
+        return result;
+      }
 
-      case "list_comments":
+      case "list_comments": {
         if (!parameters.postId) throw new Error("postId is required");
-        return await api('GET', `/posts/${parameters.postId}/comments`);
+        const result = await api('GET', `/posts/${parameters.postId}/comments`);
+        logger.info(`Retrieved ${result.length} comments for post: ${parameters.postId}`);
+        return result;
+      }
 
-      case "clarify":
+      case "clarify": {
         return { message: parameters.message || 'I need more details to complete that request.' };
+      }
 
       default:
         throw new Error(`Unknown action: ${action}`);
     }
   } catch (error) {
+    logger.error(`Action execution failed: ${action}`, error);
     throw new Error(`Failed to execute ${action}: ${error.message}`);
   }
 }
@@ -472,29 +588,62 @@ app.post('/mcp', async (req, res) => {
   }
 });
 
-// --- New endpoint for direct AI chatbot interaction ---
-app.post('/ai-chatbot', async (req, res) => {
-  try {
-    const { message, context } = req.body;
+// --- Health check endpoint ---
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    mcp_port: PORT,
+    api_base: API_BASE,
+    ollama_model: OLLAMA_MODEL,
+    ollama_host: ollamaHost,
+    timestamp: new Date().toISOString()
+  });
+});
 
-    if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+// --- New endpoint for direct AI chatbot interaction (PRODUCTION) ---
+app.post('/ai-chatbot', async (req, res) => {
+  const startTime = Date.now();
+  const { message, context } = req.body;
+
+  logger.info(`=== AI Chatbot Request Received ===`);
+  logger.info(`Message: "${message}"`);
+
+  try {
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      logger.warn('Invalid message received');
+      return res.status(400).json({ 
+        error: 'Message is required and must be non-empty',
+        success: false
+      });
     }
 
     // Process the user message with the AI to determine the action
-    const actionPlan = await processUserMessage(message, context || {});
+    logger.info('Step 1: Processing user message with AI...');
+    const actionPlan = await processUserMessage(message.trim(), context || {});
+    logger.info(`Step 2: Action determined: ${actionPlan.action}`);
 
     // Execute the determined action
+    logger.info(`Step 3: Executing action: ${actionPlan.action}`);
     const result = await executeAction(actionPlan.action, actionPlan.parameters);
+    logger.info(`Step 4: Action executed successfully`);
 
-    res.json({
+    const response = {
+      success: true,
       action: actionPlan.action,
       explanation: actionPlan.explanation,
-      result: result
-    });
+      result: result,
+      executionTime: `${Date.now() - startTime}ms`
+    };
+
+    logger.info(`=== AI Chatbot Request Completed (${response.executionTime}) ===`);
+    res.json(response);
   } catch (error) {
-    console.error('AI Chatbot error:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    logger.error(`=== AI Chatbot Request Failed ===`, error);
+    res.status(500).json({ 
+      error: error.message || 'Internal server error',
+      success: false,
+      executionTime: `${Date.now() - startTime}ms`
+    });
   }
 });
 
@@ -507,7 +656,20 @@ app.get('/mcp', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`MCP server (streamable HTTP) listening on port ${PORT}, endpoint POST /mcp (no auth)`);
-  console.log(`API base: ${API_BASE}`);
-  console.log(`AI Chatbot endpoint: POST /ai-chatbot`);
+  logger.info(`========================================`);
+  logger.info(`MCP Server Started (Production Ready)`);
+  logger.info(`========================================`);
+  logger.info(`Port: ${PORT}`);
+  logger.info(`API Base: ${API_BASE}`);
+  logger.info(`Ollama Host: ${ollamaHost}`);
+  logger.info(`Ollama Model: ${OLLAMA_MODEL}`);
+  logger.info(`----------------------------------------`);
+  logger.info(`Endpoints:`);
+  logger.info(`  POST /ai-chatbot - AI chatbot for performing actions`);
+  logger.info(`  POST /mcp - MCP protocol endpoint`);
+  logger.info(`  GET /health - Health check`);
+  logger.info(`----------------------------------------`);
+  logger.info(`The AI chatbot can now perform real actions through this server.`);
+  logger.info(`Ensure Ollama is running at: ${ollamaHost}`);
+  logger.info(`========================================`);
 });

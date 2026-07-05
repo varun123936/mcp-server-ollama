@@ -156,26 +156,9 @@ app.get('/posts/:id/comments', async (req, res) => {
   }
 });
 
-// AI Chatbot endpoint
-app.post('/ai-chatbot', async (req, res) => {
-  try {
-    const { message } = req.body;
-
-    if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
-    }
-
-    // For demonstration purposes, we'll just echo the message back
-    // In a real implementation, you would integrate with Ollama here
-    return res.json({
-      message: `AI Assistant response to: "${message}"`,
-      action: 'echo',
-      result: { echoedMessage: message }
-    });
-  } catch (err) {
-    return sendError(res, 500, err.message || 'Server error');
-  }
-});
+// NOTE: AI Chatbot functionality has been moved to MCP server (port 5001)
+// The main API server focuses on RESTful operations only
+// Use POST /ai-chatbot endpoint on MCP server for natural language processing
 
 async function start() {
   try {
