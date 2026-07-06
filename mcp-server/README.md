@@ -1,17 +1,22 @@
 # MCP Server (Streamable HTTP)
 
-MCP server that exposes the **Posts & Comments API** as tools over **Streamable HTTP**. No auth on `/mcp`.
+This MCP server exposes the blog API through two practical paths:
 
-**Requires Node 18+** (MCP SDK and Hono depend on it).
+1. An AI chatbot flow using POST /ai-chatbot
+2. An MCP client flow using POST /mcp
+
+The server runs on port 5001 by default and forwards real actions to the main REST API on port 3002.
 
 ## Setup
 
-1. **Start the main API** (Posts server) first, e.g. on port 3000:
+1. Start the main REST API first:
    ```bash
-   cd .. && MONGO_URI="mongodb://..." npm start
+   cd ..
+   export MONGO_URI="mongodb://localhost:27017/mcp-api"
+   npm start
    ```
 
-2. **Install and start the MCP server** (default port 3001):
+2. Start the MCP server:
    ```bash
    npm install
    npm start
@@ -19,35 +24,45 @@ MCP server that exposes the **Posts & Comments API** as tools over **Streamable 
 
 ## Configuration
 
-- **`API_BASE_URL`** – Base URL of the Posts API (default: `http://localhost:3000`).
-- **`MCP_PORT`** – Port for this MCP server (default: `3001`).
+- API_BASE_URL: base URL of the main API (default: http://localhost:3002)
+- MCP_PORT: port for this MCP server (default: 5001)
+- OLLAMA_MODEL: Ollama model to use (default: gemma2)
+- OLLAMA_HOST: Ollama host (default: http://localhost:11434)
 
-## Endpoint
+## Endpoints
 
-- **`POST /mcp`** – MCP Streamable HTTP endpoint (no authentication).  
-  MCP clients send JSON-RPC here; the server handles initialization and tool calls.
+- POST /mcp: MCP Streamable HTTP endpoint for MCP clients
+- POST /ai-chatbot: direct AI chatbot endpoint for natural language actions
+- GET /health: health check
+- GET /mcp: returns 405 Method Not Allowed
 
-- **`GET /mcp`** – Returns `405 Method Not Allowed` (stateless server, no SSE session).
+## Available tools
 
-## Tools (with validation)
+The MCP server exposes these tools:
 
-All tools call the main API and apply the same validation rules.
+- create_post
+- list_posts
+- get_post
+- update_post
+- delete_post
+- add_comment
+- list_comments
+- ai_chatbot_agent
 
-| Tool | Description | Validation |
-|------|-------------|------------|
-| `create_post` | Create a post | title ≥5, author ≥3, category ∈ tech/finance/lifestyle, body ≥50 |
-| `list_posts` | List all posts | — |
-| `get_post` | Get one post by ID | — |
-| `update_post` | Update a post | Same as create_post |
-| `delete_post` | Delete a post (and its comments) | — |
-| `add_comment` | Add comment to a post | text ≥10, commenter required |
-| `list_comments` | List comments for a post | — |
+All tools validate input and forward the request to the main REST API.
 
-Validation errors (e.g. invalid category, body too short) are returned as tool errors with clear messages. If the API returns 404 (e.g. post not found), the tool returns that as an error.
+## Flow 1: AI chatbot
 
-## Flow
+1. A client sends a message to POST /ai-chatbot.
+2. The server sends the message to Ollama.
+3. Ollama returns an action plan.
+4. The server executes that action against the main REST API.
+5. The result is returned as a structured response.
 
-1. MCP client sends `POST /mcp` with JSON-RPC (e.g. `initialize`, then `tools/call`).
-2. Server uses **Streamable HTTP** transport (stateless, new server + transport per request).
-3. Tool handlers validate arguments (Zod + custom rules), then `fetch()` the Posts API.
-4. API response is returned as the tool result (or an error).
+## Flow 2: MCP client
+
+1. An MCP client sends a JSON-RPC request to POST /mcp.
+2. The server handles initialization and tool calls.
+3. The requested tool calls the main REST API.
+4. The REST API performs the real database action.
+5. The tool result is returned to the client.

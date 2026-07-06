@@ -1,265 +1,221 @@
-# MCP API with AI Chatbot Agent
+﻿# MCP Server Ollama
 
-Node.js Express API for **Posts** and **Comments**, backed by MongoDB (Mongoose). All responses are JSON.
+This repository contains a small blog-style application with two working flows:
 
-There is also an **MCP server** in the `mcp-server/` folder that exposes this API as MCP tools over **Streamable HTTP** at `POST /mcp` (no auth). See `mcp-server/README.md` for setup and tool list.
+1. An AI chatbot flow where natural language requests are translated into real actions against the posts and comments API.
+2. An MCP flow where an MCP client calls the MCP endpoint and performs real actions through exposed tools.
 
-This project has been enhanced with an **AI Chatbot Agent** that can understand natural language commands and perform CRUD operations using the Ollama Gemma2 model.
+The project is split into two services:
 
+- Main REST API server: server.js
+- MCP server with Ollama integration: mcp-server/server.js
+
+## What the app does
+
+The main API stores and manages posts and comments in MongoDB.
+
+- Posts contain: title, author, category, body, createdAt
+- Comments belong to a post and contain: postId, text, commenter, createdAt
+
+The MCP server adds two higher-level interaction paths on top of that REST API.
+
+---
+## Architecture
+
+### Flow 1: AI chatbot -> REST API -> MongoDB
+
+This flow is used when a user talks to the chatbot interface or sends a request to the AI endpoint.
+
+1. A user sends a message such as “Create a new post...” to the chatbot UI or to the AI endpoint.
+2. The MCP server sends the message to Ollama.
+3. Ollama returns an action plan such as create_post, list_posts, add_comment, and so on.
+4. The MCP server executes that action by calling the main REST API.
+5. The REST API updates MongoDB and returns the result.
+
+This path is used by:
+- the chatbot page at public/chatbot.html
+- the endpoint POST /ai-chatbot on the MCP server
+
+### Flow 2: MCP client -> /mcp -> tools -> REST API -> MongoDB
+
+This flow is used when an MCP client connects to the MCP server.
+
+1. The MCP client sends a JSON-RPC request to POST /mcp.
+2. The MCP server handles initialization and tool calls.
+3. The server invokes registered tools such as create_post, list_posts, update_post, delete_post, add_comment, and list_comments.
+4. Each tool calls the main REST API.
+5. The REST API performs the action in MongoDB.
+
+This is the path used by MCP-compatible clients.
+
+---
 ## Project structure
 
-- `server.js`: Backend REST API (Node.js + Express + MongoDB) for posts and comments.
-- `public/`: Frontend UI that talks to this backend (served by Express via `express.static('public')`).
-- `mcp-server/`: MCP server that wraps this backend and exposes it as MCP tools.
-- `public/chatbot.html`: AI chatbot interface for natural language interaction.
+- server.js: Main REST API for posts and comments
+- public/: Web UI for the blog and chatbot experience
+- public/chatbot.html: AI chatbot UI
+- mcp-server/server.js: MCP server with AI and tool support
+- mcp-server/README.md: MCP-specific details
 
 ---
 ## Setup
 
-1. **Install backend dependencies**
-   ```bash
-   npm install
-   ```
+### 1. Install dependencies
 
-2. **Set MongoDB connection for the backend**
-   ```bash
-   # example
-   export MONGO_URI="mongodb://localhost:27017/mcp-api"
-   ```
-
-3. **Install Ollama and the Gemma2 model**
-   ```bash
-   # Install Ollama from https://ollama.com/
-   # Then pull the Gemma2 model
-   ollama pull gemma2:2b
-   ```
-
-4. **Start the backend server**
-   ```bash
-   npm start
-   ```
-   Server runs on **port 3002** (see `PORT` in `server.js`).
-
-5. **Open the UI**
-
-   The UI is served from the `public/` folder by Express. Once the backend is running, open:
-
-   - `http://localhost:3002/` in your browser for the main blog interface.
-   - `http://localhost:3002/chatbot.html` for the AI chatbot interface.
-
----
-## Running the MCP server
-
-The MCP server lives in the `mcp-server/` folder and wraps this backend.
-
-1. **Make sure the backend is running first**
-
-   From the project root:
-   ```bash
-   # in one terminal
-   export MONGO_URI="mongodb://localhost:27017/mcp-api"
-   npm start          # backend on http://localhost:3002
-   ```
-
-2. **Start the MCP server**
-
-   In a new terminal:
-   ```bash
-   cd mcp-server
-   npm install        # first time only
-   npm start
-   ```
-
-   By default:
-   - Backend base URL: `http://localhost:3002`
-   - MCP server port: `3001`
-   - MCP HTTP endpoint: `POST http://localhost:3001/mcp`
-   - AI Chatbot endpoint: `POST http://localhost:3001/ai-chatbot`
-
----
-## AI Chatbot Agent
-
-The AI Chatbot Agent is a new feature that allows users to interact with the blog system using natural language commands. It uses the Ollama Gemma2 model to understand user requests and map them to appropriate API actions.
-
-### Features
-
-1. **Natural Language Processing**: Understands user requests in plain English
-2. **CRUD Operations**: Can create, read, update, and delete posts and comments
-3. **Context Awareness**: Provides relevant context to the AI model
-4. **Web Interface**: User-friendly chat interface
-5. **API Endpoint**: Direct API access for integration
-
-### How It Works
-
-1. User sends a natural language request (e.g., "Create a new post about AI")
-2. The AI processes the request using the Ollama Gemma2 model
-3. The AI determines the appropriate action and parameters
-4. The system executes the corresponding API call
-5. Results are returned to the user in a conversational format
-
-### Example Commands
-
-- "Create a new post with title 'The Future of AI', author 'Tech Writer', category 'tech', and body 'Artificial intelligence is rapidly evolving...'"
-- "List all posts"
-- "Show me all posts in the tech category"
-- "Update post ID 12345 with a new title 'The Future of AI and Machine Learning'"
-- "Delete the post with ID 12345"
-- "Add a comment 'This is fascinating!' from 'Reader' to post ID 67890"
-- "List all comments for post ID 67890"
-
-### Web Interface
-
-Navigate to `http://localhost:3002/chatbot.html` to access the AI chatbot interface. The interface includes:
-- Chat message display
-- Text input for commands
-- Example commands for quick access
-- Real-time responses from the AI
-
-### API Endpoint
-
-You can also interact with the AI chatbot directly via the API:
+From the project root:
 
 ```bash
-curl -X POST http://localhost:3001/ai-chatbot \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Create a new post about technology trends"}'
+npm install
 ```
 
-Response format:
-```json
-{
-  "action": "create_post",
-  "explanation": "Creating a new post with the provided details",
-  "result": {
-    "_id": "67890",
-    "title": "Technology Trends",
-    "author": "AI Assistant",
-    "category": "tech",
-    "body": "This is a post about technology trends...",
-    "createdAt": "2026-07-04T12:00:00.000Z"
-  }
-}
+Then install the MCP server dependencies:
+
+```bash
+cd mcp-server
+npm install
+```
+
+### 2. Configure MongoDB
+
+Set the MongoDB connection string for the main API:
+
+```bash
+export MONGO_URI="mongodb://localhost:27017/mcp-api"
+```
+
+### 3. Install Ollama
+
+Make sure Ollama is running locally and that the model is available.
+
+```bash
+ollama pull gemma2
 ```
 
 ---
-## Validation
+## Run the services
 
-The API validates request bodies and returns clear error messages.
+### Start the main REST API
 
-### Post (create & update)
+From the project root:
 
-| Field     | Rule                          | Error (400) |
-|----------|--------------------------------|-------------|
-| `title`  | Required, min 5 characters     | `"title is required"` / `"title must be at least 5 characters"` |
-| `author` | Required, min 3 characters     | `"author is required"` / `"author must be at least 3 characters"` |
-| `category` | Required, one of: `tech`, `finance`, `lifestyle` | `"Invalid category"` |
-| `body`   | Required, min 50 characters    | `"body is required"` / `"body must be at least 50 characters"` |
+```bash
+npm start
+```
 
-- **Missing required fields** → `400` with a message describing what's wrong.
-- **Invalid category** → `400` with message `"Invalid category"`.
-- **Body shorter than 50 characters** → `400`.
+The main API runs on:
+- http://localhost:3002
 
-### Comment (create)
+### Start the MCP server
 
-| Field       | Rule                          | Error (400) |
-|------------|--------------------------------|-------------|
-| `text`     | Required, min 10 characters    | `"text is required"` / `"text must be at least 10 characters"` |
-| `commenter`| Required                       | `"commenter is required"` |
+In a second terminal:
 
-- **Comment text shorter than 10 characters** → `400`.
+```bash
+cd mcp-server
+npm start
+```
 
-### Post not found
+The MCP server runs on:
+- http://localhost:5001
 
-- Invalid or non-existent post ID (e.g. for `GET/PUT/DELETE /posts/:id` or comment routes) → **404** with `"Post not found"`.
+### Open the UI
 
-All error responses use the shape: `{ "error": "<message>" }`.
+- Main blog UI: http://localhost:3002/
+- Chatbot UI: http://localhost:5001/
 
 ---
-## API Endpoints
+## API endpoints
 
-Base URL: `http://localhost:3002`
+Base URL for the main REST API:
+
+- http://localhost:3002
 
 ### Posts
 
-| Method | Path           | Description                    | Success |
-|--------|----------------|--------------------------------|---------|
-| `POST` | `/posts`      | Create a post (validated)      | `201` + created post |
-| `GET`  | `/posts`      | List all posts                 | `200` + array of posts |
-| `GET`  | `/posts/:id`  | Get one post                   | `200` + post, or `404` |
-| `PUT`  | `/posts/:id`  | Update a post (same validation)| `200` + updated post, or `404` |
-| `DELETE` | `/posts/:id`| Delete a post (and its comments) | `200` + `{ "message": "Post deleted" }`, or `404` |
+- POST /posts: create a post
+- GET /posts: list posts
+- GET /posts/:id: get one post
+- PUT /posts/:id: update a post
+- DELETE /posts/:id: delete a post and its comments
 
 ### Comments
 
-| Method | Path                  | Description           | Success |
-|--------|-----------------------|-----------------------|---------|
-| `POST` | `/posts/:id/comments` | Add a comment to post | `201` + created comment, or `404` if post not found |
-| `GET`  | `/posts/:id/comments` | List comments for post| `200` + array of comments, or `404` if post not found |
+- POST /posts/:id/comments: add a comment
+- GET /posts/:id/comments: list comments for a post
 
-### AI Chatbot
+### Validation rules
 
-| Method | Path           | Description                    | Success |
-|--------|----------------|--------------------------------|---------|
-| `POST` | `/ai-chatbot`  | Process natural language command | `200` + action result |
+Posts require:
+- title: minimum 5 characters
+- author: minimum 3 characters
+- category: tech, finance, or lifestyle
+- body: minimum 50 characters
+
+Comments require:
+- text: minimum 10 characters
+- commenter: required
 
 ---
-## Request / Response Examples
+## AI chatbot flow
 
-### Create a post
-```http
-POST /posts
-Content-Type: application/json
+The AI chatbot flow is handled by the MCP server.
 
-{
-  "title": "Getting started with Node",
-  "author": "Jane",
-  "category": "tech",
-  "body": "This is a longer body that meets the minimum length requirement of fifty characters."
-}
-```
-→ `201` + post object (includes `_id`, `createdAt`).
+### Endpoint
 
-### Create a comment
-```http
-POST /posts/<postId>/comments
-Content-Type: application/json
+- POST /ai-chatbot on the MCP server
 
-{
-  "text": "Great post, very helpful!",
-  "commenter": "Alex"
-}
-```
-→ `201` + comment object.
+### How it works
 
-### AI Chatbot Request
-```http
-POST /ai-chatbot
-Content-Type: application/json
+1. The client sends a natural language message.
+2. The MCP server asks Ollama to interpret the request.
+3. Ollama returns an action such as create_post or add_comment.
+4. The MCP server executes that action by calling the main REST API.
+5. The result is returned to the client in a structured response.
 
-{
-  "message": "Create a new post about AI advancements"
-}
-```
-→ `200` + JSON response with action details.
+### Example
 
-### Error response (validation)
-```json
-{ "error": "Invalid category" }
-```
-```json
-{ "error": "body must be at least 50 characters" }
-```
-
-### Error response (not found)
-```json
-{ "error": "Post not found" }
+```bash
+curl -X POST http://localhost:5001/ai-chatbot \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Create a new post about AI trends"}'
 ```
 
 ---
-## Data Models (summary)
+## MCP flow
 
-- **Post**: `title`, `author`, `category`, `body`, `createdAt` (auto).
-- **Comment**: `postId` (reference to post), `text`, `commenter`, `createdAt` (auto).
-- IDs are MongoDB ObjectIds, auto-generated.
+The MCP flow is handled by the MCP server over Streamable HTTP.
 
-Use this README to walk through validation rules and the exposed API when explaining the project.
+### Endpoint
+
+- POST /mcp
+
+### How it works
+
+1. An MCP client sends a JSON-RPC request to /mcp.
+2. The MCP server initializes the connection and handles tool calls.
+3. Tools such as create_post, list_posts, update_post, delete_post, add_comment, and list_comments are executed.
+4. Each tool calls the REST API and returns the response.
+
+### Example MCP action
+
+An MCP client can call the create_post tool to create a post, and the server will forward that action to the main API.
+
+---
+## Tool summary
+
+The MCP server exposes these tools:
+
+- create_post
+- list_posts
+- get_post
+- update_post
+- delete_post
+- add_comment
+- list_comments
+- ai_chatbot_agent
+
+---
+## Notes
+
+- The main REST API is the data layer.
+- The MCP server is the orchestration layer for AI and MCP clients.
+- The chatbot and MCP client are both real action executors, not just read-only assistants.
